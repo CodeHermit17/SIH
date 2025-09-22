@@ -1,42 +1,58 @@
 import os
-import shutil
+import numpy as np
+import cv2
 from face_lib.engine import FaceRecognitionEngine
 
-KNOWN_FACES_DIR = "data/known_faces"
-DB_DIR = "output/embeddings/known_db"
+# Input: folder with images of a **single person**
+INPUT_DIR = "/home/kp17/Code/Projects/SIH/pipeline/data/known_faces/Manan_shah"
+# Output: directory where final .npy will be saved
+OUTPUT_DIR = "/home/kp17/Code/Projects/SIH/pipeline/data/output/embeddings/known_db"
+# The name of the person (used to name the .npy file)
+PERSON_NAME = "manan_shah"
 
-def enroll_new_person():
-    """Interactive script to enroll a new person."""
-    os.makedirs(KNOWN_FACES_DIR, exist_ok=True)
-    
-    person_name = input("Enter the name of the person to enroll (e.g., 'john_doe'): ").strip().lower().replace(" ", "_")
-    if not person_name:
-        print("❌ Name cannot be empty.")
+def generate_embedding_for_person():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    image_files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+
+    if not image_files:
+        print(f"❌ No image files found in: {INPUT_DIR}")
         return
 
-    person_dir = os.path.join(KNOWN_FACES_DIR, person_name)
-    if os.path.exists(person_dir):
-        print(f"✔️ A directory for '{person_name}' already exists.")
-        action = input("Do you want to add more photos? (y/n): ").lower()
-        if action != 'y':
-            print("Aborting enrollment.")
-            return
-    else:
-        os.makedirs(person_dir)
+    print(f"🧠 Generating embeddings for person: {PERSON_NAME}")
+    print(f"📁 From directory: {INPUT_DIR}")
+    print(f"💾 Saving to: {os.path.join(OUTPUT_DIR, PERSON_NAME + '.npy')}")
 
-    print(f"\n✅ A folder has been created at: {person_dir}")
-    print("Please add several clear photos of the person to this folder.")
-    input("\nPress ENTER when you have finished adding the photos...")
-
-    # Check if photos were added
-    if not any(fname.lower().endswith(('.jpg', '.jpeg', '.png')) for fname in os.listdir(person_dir)):
-        print("❌ No images found in the directory. Deleting empty folder.")
-        shutil.rmtree(person_dir)
-        return
-
-    print("\nProcessing images and updating the face database...")
     engine = FaceRecognitionEngine()
-    engine.prepare_known_database(KNOWN_FACES_DIR, DB_DIR)
+    embeddings = []
+
+    for img_name in image_files:
+        img_path = os.path.join(INPUT_DIR, img_name)
+        print(f"  ➜ Processing {img_name}")
+
+        try:
+            img = cv2.imread(img_path)
+            if img is None:
+                print(f"  ❌ Could not read image: {img_path}")
+                continue
+
+            embedding = engine.get_embedding(img)
+            if embedding is not None:
+                embeddings.append(embedding)
+            else:
+                print(f"  ⚠️ No embedding returned for {img_name}")
+        except Exception as e:
+            print(f"  ❌ Error processing {img_name}: {e}")
+
+    if embeddings:
+        embeddings = np.stack(embeddings)
+        avg_embedding = np.mean(embeddings, axis=0)
+
+        out_path = os.path.join(OUTPUT_DIR, f"{PERSON_NAME}.npy")
+        np.save(out_path, avg_embedding)
+        print(f"\n✅ Saved average embedding to: {out_path}")
+    else:
+        print("❌ No valid embeddings generated.")
 
 if __name__ == "__main__":
-    enroll_new_person()
+    generate_embedding_for_person()
