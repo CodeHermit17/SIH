@@ -5,10 +5,6 @@ env/
 venv/
 .env
 
-# Output & Data
-output/
-
-
 # IDE files
 .vscode/
 .idea/

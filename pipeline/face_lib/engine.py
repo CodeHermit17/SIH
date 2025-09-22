@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import os
 from insightface.app import FaceAnalysis
-from retinaface import RetinaFace
 from sklearn.metrics.pairwise import cosine_similarity
 
 class FaceRecognitionEngine:
@@ -13,9 +12,20 @@ class FaceRecognitionEngine:
         self.app.prepare(ctx_id=0)
         print("Model loaded successfully.")
 
-    def get_embedding(self, image):
+    def get_embedding(self, image, debug=False):
         """Generates a 512D embedding for a single face image."""
+        if debug:
+            print(f"    Input image shape: {image.shape if image is not None else 'None'}")
+        
+        if image is None:
+            if debug:
+                print("    Error: Input image is None")
+            return None
+            
         faces = self.app.get(image)
+        if debug:
+            print(f"    InsightFace detected {len(faces) if faces else 0} faces")
+            
         if not faces:
             return None
         return faces[0].normed_embedding
@@ -51,41 +61,76 @@ class FaceRecognitionEngine:
                 print(f"[!] Skipped {person_name}: No valid faces found.")
         print("\n✅ Known faces database is up to date.")
 
-    def detect_and_crop_faces(self, video_path):
-        """Detects faces in a video and yields cropped face images."""
+    def detect_faces_and_embeddings(self, video_path):
+        """Detects faces in a video and yields their embeddings directly."""
+        # Validate video file exists
+        if not os.path.exists(video_path):
+            print(f"❌ Error: Video file does not exist: {video_path}")
+            return
+        
+        # Check file extension
+        valid_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')
+        if not video_path.lower().endswith(valid_extensions):
+            print(f"⚠️ Warning: File may not be a supported video format: {video_path}")
+        
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            print(f"❌ Error: Could not open video file.")
+            print(f"❌ Error: Could not open video file: {video_path}")
+            print("Possible issues: corrupted file, unsupported codec, or insufficient permissions")
             return
 
         fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            print("❌ Error: Could not determine video FPS")
+            cap.release()
+            return
+            
         frame_interval = int(5 * fps) # Process every 5 seconds
         frame_count = 0
         
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            if frame_count % frame_interval == 0:
-                print(f"-> Scanning video at {frame_count / fps:.2f} seconds...")
-                detections = RetinaFace.detect_faces(frame, threshold=0.7)
-                if isinstance(detections, dict):
-                    for face_info in detections.values():
-                        x1, y1, x2, y2 = face_info['facial_area']
-                        cropped_face = frame[y1:y2, x1:x2]
-                        if cropped_face.size > 0:
-                            yield cv2.resize(cropped_face, (112, 112))
-            frame_count += 1
-        cap.release()
+                if frame_count % frame_interval == 0:
+                    print(f"-> Scanning video at {frame_count / fps:.2f} seconds...")
+                    try:
+                        # Use InsightFace for both detection and cropping
+                        faces = self.app.get(frame)
+                        print(f"   InsightFace detected {len(faces) if faces else 0} face(s)")
+                        
+                        if faces:
+                            for i, face in enumerate(faces):
+                                # Get the bounding box for debugging
+                                bbox = face.bbox.astype(int)
+                                x1, y1, x2, y2 = bbox
+                                print(f"   Face {i+1}: bbox=({x1},{y1},{x2},{y2})")
+                                
+                                # Directly yield the embedding from the detected face
+                                if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                                    print(f"   Face {i+1}: Got embedding directly from InsightFace")
+                                    yield face.normed_embedding
+                                else:
+                                    print(f"   Face {i+1}: No embedding available")
+                        else:
+                            print(f"   No faces detected by InsightFace")
+                    except Exception as e:
+                        print(f"⚠️ Warning: Face detection failed at frame {frame_count}: {e}")
+                        
+                frame_count += 1
+        finally:
+            cap.release()
 
-    def compare_embeddings(self, input_embedding, known_db_dir, threshold=0.5):
+    def compare_embeddings(self, input_embedding, known_db_dir, threshold=0.6, debug=False):
         """Compares a single input embedding against the known database."""
         if not os.path.exists(known_db_dir) or not os.listdir(known_db_dir):
             return "Unknown", -1 # Return if database is empty
 
         best_match = "Unknown"
         best_score = -1
+        all_scores = []
 
         for filename in os.listdir(known_db_dir):
             if filename.endswith('.npy'):
@@ -93,9 +138,17 @@ class FaceRecognitionEngine:
                 known_emb = np.load(os.path.join(known_db_dir, filename))
                 
                 score = cosine_similarity([input_embedding], [known_emb])[0][0]
+                all_scores.append((known_name, score))
+                
+                if debug:
+                    print(f"    Similarity with {known_name}: {score:.4f}")
+                
                 if score > best_score:
                     best_score = score
                     best_match = known_name
+        
+        if debug:
+            print(f"    Best match: {best_match} (score: {best_score:.4f}, threshold: {threshold})")
         
         if best_score >= threshold:
             return best_match, best_score

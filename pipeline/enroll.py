@@ -1,34 +1,40 @@
 import os
 import numpy as np
 import cv2
+import argparse
 from face_lib.engine import FaceRecognitionEngine
 
-# Input: folder with images of a **single person**
-INPUT_DIR = "/home/kp17/Code/Projects/SIH/pipeline/data/known_faces/Manan_shah"
-# Output: directory where final .npy will be saved
-OUTPUT_DIR = "/home/kp17/Code/Projects/SIH/pipeline/data/output/embeddings/known_db"
-# The name of the person (used to name the .npy file)
-PERSON_NAME = "manan_shah"
+def generate_embedding_for_person(input_dir, output_dir, person_name):
+    """Generate embeddings for a person from their images.
+    
+    Args:
+        input_dir: Directory containing images of the person
+        output_dir: Directory to save the embedding file
+        person_name: Name of the person (used for filename)
+    """
+    # Validate input directory exists
+    if not os.path.exists(input_dir):
+        print(f"❌ Input directory does not exist: {input_dir}")
+        return False
+    
+    os.makedirs(output_dir, exist_ok=True)
 
-def generate_embedding_for_person():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    image_files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    image_files = [f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 
     if not image_files:
-        print(f"❌ No image files found in: {INPUT_DIR}")
-        return
+        print(f"❌ No image files found in: {input_dir}")
+        return False
 
-    print(f"🧠 Generating embeddings for person: {PERSON_NAME}")
-    print(f"📁 From directory: {INPUT_DIR}")
-    print(f"💾 Saving to: {os.path.join(OUTPUT_DIR, PERSON_NAME + '.npy')}")
+    print(f"🧠 Generating embeddings for person: {person_name}")
+    print(f"📁 From directory: {input_dir}")
+    print(f"💾 Saving to: {os.path.join(output_dir, person_name + '.npy')}")
 
     engine = FaceRecognitionEngine()
     embeddings = []
 
     for img_name in image_files:
-        img_path = os.path.join(INPUT_DIR, img_name)
-        print(f"  ➜ Processing {img_name}")
+        img_path = os.path.join(input_dir, img_name)
+        print(f"  ➤ Processing {img_name}")
 
         try:
             img = cv2.imread(img_path)
@@ -48,11 +54,31 @@ def generate_embedding_for_person():
         embeddings = np.stack(embeddings)
         avg_embedding = np.mean(embeddings, axis=0)
 
-        out_path = os.path.join(OUTPUT_DIR, f"{PERSON_NAME}.npy")
+        out_path = os.path.join(output_dir, f"{person_name}.npy")
         np.save(out_path, avg_embedding)
         print(f"\n✅ Saved average embedding to: {out_path}")
+        return True
     else:
         print("❌ No valid embeddings generated.")
+        return False
 
 if __name__ == "__main__":
-    generate_embedding_for_person()
+    parser = argparse.ArgumentParser(description="Generate face embeddings for a person from their images.")
+    parser.add_argument('--person', type=str, required=True, help='Name of the person (will be used as filename)')
+    parser.add_argument('--input_dir', type=str, required=True, help='Directory containing images of the person')
+    parser.add_argument('--output_dir', type=str, default='data/output/embeddings/known_db', 
+                       help='Directory to save the embedding file (default: data/output/embeddings/known_db)')
+    
+    args = parser.parse_args()
+    
+    # Convert relative paths to absolute paths
+    input_dir = os.path.abspath(args.input_dir)
+    output_dir = os.path.abspath(args.output_dir)
+    
+    success = generate_embedding_for_person(input_dir, output_dir, args.person)
+    
+    if success:
+        print(f"\n✅ Successfully enrolled {args.person}!")
+    else:
+        print(f"\n❌ Failed to enroll {args.person}.")
+        exit(1)
