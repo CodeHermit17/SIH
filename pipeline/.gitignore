@@ -7,7 +7,7 @@ venv/
 
 # Output & Data
 output/
-data/
+
 
 # IDE files
 .vscode/
